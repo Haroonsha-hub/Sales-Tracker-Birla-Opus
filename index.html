@@ -155,10 +155,18 @@ summary{font-weight:700;cursor:pointer;font-size:16px}
         <img id="posterImg" class="hidden" alt="Tracker poster preview">
       </div>
       <div class="btnrow">
-        <button class="main" id="dl" type="button" disabled>Download poster</button>
+        <button class="main" id="dlBoth" type="button" disabled>Download poster + dealer list</button>
+      </div>
+      <div class="btnrow">
+        <button class="ghost" id="dl" type="button" disabled>Poster only</button>
+        <button class="ghost" id="dlDealers" type="button" disabled>Dealer list only</button>
       </div>
       <div class="msg" id="msg"></div>
       <p class="hint">On a phone, Download opens the share sheet, so you can send it straight to WhatsApp.</p>
+      <div class="preview hidden" id="dealerPrev" style="margin-top:16px">
+        <h2 style="font-family:'Barlow Condensed',Barlow,sans-serif;font-size:20px;margin:2px 4px 10px">Dealer-wise billing today</h2>
+        <img id="dealerImg" alt="Dealer-wise billing today preview">
+      </div>
     </div>
   </div>
 </div>
@@ -259,6 +267,7 @@ summary{font-weight:700;cursor:pointer;font-size:16px}
       const res = parseTSM(wb);
       if (!res){ fstatus("No TSM sheet found. The file needs a sheet with TERRITORY NAME, MTD VAL TARGET and MTD GSR VAL columns.", true); return; }
       allRows = res;
+      dealerRows = parseDealers(wb);
       const hadLive = Object.keys(store.get(liveKey())||{}).length > 0;
       store.set(liveKey(), {});
       fstatus(f.name+" loaded, "+allRows.length+" territories."+(hadLive?" Your earlier actual and billed edits were cleared.":""));
@@ -266,6 +275,38 @@ summary{font-weight:700;cursor:pointer;font-size:16px}
       fillAsm();
     };
     r.readAsArrayBuffer(f);
+  }
+
+  let dealerRows = [];   // {tty, asm, code, name, mtd, today}  values in rupees
+  function parseDealers(wb){
+    const find = (want) => {
+      for (const n of wb.SheetNames){
+        const aoa = XLSX.utils.sheet_to_json(wb.Sheets[n], {header:1, raw:true, defval:null});
+        for (let h=0; h<Math.min(8,aoa.length); h++){
+          const hdr = (aoa[h]||[]).map(v => norm(v).toUpperCase());
+          if (want.every(k => hdr.includes(k))) return { aoa, h, col:k=>hdr.indexOf(k) };
+        }
+      }
+      return null;
+    };
+    // Preferred: DEALERS sheet (has MTD GSR and today's billed GSR per dealer)
+    let t = find(["CUSTOMER","CUSTOMER NAME","TTY","MTD GSR VAL","TODAY BILD GSR VALUE"]);
+    if (t){
+      const c={code:t.col("CUSTOMER"),name:t.col("CUSTOMER NAME"),tty:t.col("TTY"),asm:t.col("ASM NAME"),mtd:t.col("MTD GSR VAL"),today:t.col("TODAY BILD GSR VALUE")};
+      return t.aoa.slice(t.h+1).filter(r=>r&&r[c.code]!=null).map(r=>({
+        tty:norm(r[c.tty]), asm:c.asm>=0?norm(r[c.asm]):"", code:norm(r[c.code]), name:norm(r[c.name]), mtd:num(r[c.mtd]), today:num(r[c.today]) }));
+    }
+    // Fallback: Billing_Dump (today's invoices only, so no MTD)
+    t = find(["DEALER CODE","DEALER NAME","TTY","VALUE"]);
+    if (t){
+      const c={code:t.col("DEALER CODE"),name:t.col("DEALER NAME"),tty:t.col("TTY"),asm:t.col("ASM NAME"),val:t.col("VALUE")};
+      const m=new Map();
+      t.aoa.slice(t.h+1).forEach(r=>{ if(!r||r[c.code]==null) return; const k=norm(r[c.code]);
+        const o=m.get(k)||{tty:norm(r[c.tty]),asm:c.asm>=0?norm(r[c.asm]):"",code:k,name:norm(r[c.name]),mtd:null,today:0};
+        o.today+=num(r[c.val]); m.set(k,o); });
+      return [...m.values()];
+    }
+    return [];
   }
 
   function parseTSM(wb){
@@ -812,6 +853,132 @@ summary{font-weight:700;cursor:pointer;font-size:16px}
     const note="All figures are in Lakhs (₹)"; ctx.fillText(note, X1-ctx.measureText(note).width, TY+tableH+24);
   }
 
+  // ---------- dealer-wise billing today ----------
+  function titleCase(t){ return t.toLowerCase().replace(/(^|[\s(\-&\/.])([a-z])/g,(m,a,b)=>a+b.toUpperCase()); }
+  const inr = v => Math.round(v).toLocaleString("en-IN");
+  function dealerData(){
+    const rowsU = compute().rows, byTty = new Map(rowsU.map(r=>[r.tty, r.territory]));
+    const list = dealerRows.filter(d => byTty.has(d.tty) && Math.abs(d.today) >= 0.5);
+    const groups = new Map();
+    list.forEach(d => { const g=byTty.get(d.tty); if(!groups.has(g)) groups.set(g,[]); groups.get(g).push(d); });
+    const out = [...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([name,ds])=>({ name, dealers: ds.sort((a,b)=>b.today-a.today) }));
+    const hasMtd = list.some(d=>d.mtd!=null);
+    return { groups: out, count: list.length, today: list.reduce((a,d)=>a+d.today,0), mtd: hasMtd ? list.reduce((a,d)=>a+(d.mtd||0),0) : null, hasMtd };
+  }
+  function drawDealers(){
+    const d = dealerData();
+    const DW=1080, M=48, TOP=470, HR=52, RH=44, TOTH=58;
+    const nRows = Math.max(d.count,1);
+    const DH = TOP + HR + nRows*RH + TOTH + 110;
+    cv.width = DW*S; cv.height = DH*S;
+    ctx.setTransform(S,0,0,S,0,0);
+    const NAVY="#0B2656", TEAL="#0E8A7C", PUR="#5A4C9E", GREEN="#007A36", GREY="#5A6480";
+    ctx.fillStyle="#FFFFFF"; ctx.fillRect(0,0,DW,DH);
+    splat(1100,-10,150,"#009A44",201); splat(965,60,48,"#FDCD00",203); splat(900,20,18,"#6356A3",205);
+    splat(-30,DH+20,150,"#6356A3",207,.95); splat(1110,DH+10,120,"#FDCD00",209); splat(1000,DH-40,32,"#EE7F1B",211);
+    if (imgs.logo) drawImgFit(imgs.logo, M, 34, 210, 86, false);
+
+    const unit=unitLabel(), team=($("teamName").value||"").trim().toUpperCase();
+    ctx.fillStyle=TEAL; ctx.font=`700 20px ${COND}`; spaced(unit+" UNIT"+(team?"  ·  "+team:""), DW/2, 170, 5, "center");
+    ctx.fillStyle=NAVY; ctx.font=`800 66px ${COND}`; const t="Dealers Billed Today"; ctx.fillText(t, DW/2-ctx.measureText(t).width/2, 238);
+    const [hh,mm] = ($("updTime").value||nowTime()).split(":").map(Number);
+    const sub = new Date().toLocaleDateString("en-IN",{day:"numeric",month:"long",year:"numeric"})+"  ·  "+((hh%12)||12)+":"+pad(mm)+" "+(hh<12?"AM":"PM")+" update";
+    ctx.fillStyle=GREY; ctx.font=`500 22px Barlow, sans-serif`; ctx.fillText(sub, DW/2-ctx.measureText(sub).width/2, 278);
+
+    // stat cards
+    const cw=(DW-2*M-2*20)/3, cards=[[String(d.count),"Dealers billed",NAVY],[(d.today/1e5).toFixed(2)+" L","Today billed GSR (₹)",TEAL],[String(d.groups.length),"Territories",PUR]];
+    cards.forEach(([v,l,c],i)=>{ const x=M+i*(cw+20);
+      shadowCard(x,318,cw,112,16,c);
+      ctx.fillStyle="#FDCD00"; fit(v,cw-30,46,800,COND); ctx.fillText(v,x+cw/2-ctx.measureText(v).width/2,376);
+      ctx.fillStyle="#FFFFFF"; ctx.font=`500 18px Barlow, sans-serif`; ctx.fillText(l,x+cw/2-ctx.measureText(l).width/2,408); });
+
+    // table
+    const TW=DW-2*M, cws=[204,150,370,130,130], xs=[]; let acc=M; cws.forEach(w=>{xs.push(acc);acc+=w;});
+    const TB=TOP+HR+nRows*RH+TOTH;
+    shadowCard(M-1,TOP-1,TW+2,TB-TOP+2,14,"#FFFFFF");
+    ctx.save(); rr(M,TOP,TW,TB-TOP,14); ctx.clip();
+    ctx.fillStyle=NAVY; ctx.fillRect(M,TOP,TW,HR);
+    const heads=["Territory","Dealer Code","Dealer Name","MTD GSR (₹)","Today Billed (₹)"];
+    ctx.fillStyle="#FFFFFF"; ctx.font=`700 19px ${COND}`;
+    heads.forEach((h,i)=>{ const right=i>=3; const w=ctx.measureText(h).width; ctx.fillText(h, right? xs[i]+cws[i]-14-w : xs[i]+14, TOP+33); });
+    ctx.fillStyle="#FDCD00"; ctx.fillRect(M,TOP+HR-3,TW,3);
+    let y=TOP+HR;
+    if (!d.count){ ctx.fillStyle=GREY; ctx.font=`500 20px Barlow, sans-serif`; const e="No dealer billing yet today"; ctx.fillText(e,DW/2-ctx.measureText(e).width/2,y+28); y+=RH; }
+    d.groups.forEach((g,gi)=>{
+      const gh=g.dealers.length*RH;
+      ctx.fillStyle="#EEF2FA"; ctx.fillRect(M,y,cws[0],gh);
+      g.dealers.forEach((dl,i)=>{
+        const ry=y+i*RH, by=ry+RH/2+6;
+        if (i%2){ ctx.fillStyle="#F8FAFD"; ctx.fillRect(xs[1],ry,TW-cws[0],RH); }
+        if (i) { ctx.fillStyle="#E3E8F2"; ctx.fillRect(xs[1],ry,TW-cws[0],1); }
+        ctx.fillStyle=GREY; ctx.font=`500 16px ${COND}`; ctx.fillText(dl.code, xs[1]+14, by);
+        ctx.fillStyle=NAVY; ctx.font=`500 18px Barlow, sans-serif`;
+        let nm=titleCase(dl.name); while (nm.length>1 && ctx.measureText(nm).width>cws[2]-22) nm=nm.slice(0,-1);
+        if (nm.length<titleCase(dl.name).length) nm=nm.trim()+"…"; ctx.fillText(nm, xs[2]+14, by);
+        ctx.fillStyle="#34405E"; ctx.font=`500 18px Barlow, sans-serif`; const mv=dl.mtd==null?"–":inr(dl.mtd); ctx.fillText(mv, xs[3]+cws[3]-14-ctx.measureText(mv).width, by);
+        ctx.fillStyle= dl.today<0 ? "#C62828" : GREEN; ctx.font=`700 18px Barlow, sans-serif`; const tv=inr(dl.today); ctx.fillText(tv, xs[4]+cws[4]-14-ctx.measureText(tv).width, by);
+      });
+      const cy=y+gh/2;
+      ctx.fillStyle=NAVY; fit(g.name,cws[0]-24,21,700,"Barlow, sans-serif"); ctx.fillText(g.name,M+14, g.dealers.length>1? cy-2 : cy+7);
+      if (g.dealers.length>1){ ctx.fillStyle=GREY; ctx.font=`500 15px Barlow, sans-serif`; ctx.fillText(g.dealers.length+" dealers",M+14,cy+20); }
+      y+=gh;
+      if (gi<d.groups.length-1){ ctx.fillStyle=NAVY; ctx.fillRect(M,y-1,TW,2); }
+    });
+    ctx.fillStyle=NAVY; ctx.fillRect(M,y,TW,TOTH);
+    ctx.fillStyle="#FFFFFF"; ctx.font=`800 24px ${COND}`; ctx.fillText("TOTAL",M+14,y+37);
+    ctx.font=`700 21px Barlow, sans-serif`; const tm=d.mtd==null?"–":inr(d.mtd); ctx.fillText(tm, xs[3]+cws[3]-14-ctx.measureText(tm).width, y+36);
+    ctx.fillStyle="#FDCD00"; const tt=inr(d.today); ctx.fillText(tt, xs[4]+cws[4]-14-ctx.measureText(tt).width, y+36);
+    ctx.restore();
+    ctx.fillStyle=GREY; ctx.font=`500 16px Barlow, sans-serif`;
+    const src = "Source: KL billing dump  ·  "+(d.hasMtd? "GSR values, MTD as of today" : "Today's invoices (no MTD in this file)");
+    ctx.fillText(src, DW/2-ctx.measureText(src).width/2, TB+46);
+  }
+  let dealerUrl = null;
+  function renderDealers(){
+    if (!dealerRows.length){ $("dealerPrev").classList.add("hidden"); $("dlDealers").disabled=true; return null; }
+    drawDealers();
+    const url = cv.toDataURL("image/png");
+    $("dealerImg").src = url; $("dealerPrev").classList.remove("hidden"); $("dlDealers").disabled=false;
+    cv.width = W*S; cv.height = H*S;   // back to poster size
+    return url;
+  }
+  function canvasBlob(){ return new Promise(r => cv.toBlob(r, "image/png")); }
+  async function posterBlob(){ render(); return canvasBlob(); }
+  async function dealersBlob(){ drawDealers(); const b = await canvasBlob(); cv.width=W*S; cv.height=H*S; draw(); return b; }
+  function fileStem(){ const [hh,mm] = ($("updTime").value||nowTime()).split(":"); return `${(unitPlace()||"unit").replace(/\s+/g,"-")}-${todayKey()}-${hh}${mm}`; }
+
+  async function saveFiles(list){   // list: [{name, blob}]
+    if (!downloads){
+      const files = list.map(f => new File([f.blob], f.name, {type:"image/png"}));
+      if (navigator.canShare && navigator.canShare({files})){
+        try { await navigator.share({files, title:"Billing update"}); setMsg(list.length>1?"Poster and dealer list shared.":"Shared."); return; }
+        catch(e){ if (e && e.name==="AbortError"){ setMsg("Share cancelled."); return; } }
+      }
+      for (const f of list){
+        const url = URL.createObjectURL(f.blob), a = document.createElement("a");
+        a.href = url; a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url), 4000);
+        await new Promise(r=>setTimeout(r,400));
+      }
+      setMsg(list.length>1?"Poster and dealer list downloaded.":"Downloaded."); return;
+    }
+    for (const f of list){
+      try { await downloads.save({ filename:f.name, data:f.blob }); }
+      catch(e){
+        if (e && e.code==="declined"){ setMsg("Download cancelled."); return; }
+        if (e && e.code==="rate_limited"){ setMsg("A save prompt is already open. Try again in a moment."); return; }
+        setMsg("Saving isn't available here. Long-press the image to save or share it.", true); return;
+      }
+    }
+    setMsg(list.length>1?"Poster and dealer list ready to share.":"Ready to share.");
+  }
+  $("dlDealers").addEventListener("click", async () => { await saveFiles([{name:fileStem()+"-dealers-billed.png", blob: await dealersBlob()}]); });
+  $("dlBoth").addEventListener("click", async () => {
+    const list=[{name:fileStem()+"-billing-update.png", blob: await posterBlob()}];
+    if (dealerRows.length) list.push({name:fileStem()+"-dealers-billed.png", blob: await dealersBlob()});
+    await saveFiles(list);
+  });
+
   let timer=null;
   function schedule(){ clearTimeout(timer); timer=setTimeout(render, 250); }
   function render(){
@@ -820,7 +987,8 @@ summary{font-weight:700;cursor:pointer;font-size:16px}
     draw();
     $("posterImg").src = cv.toDataURL("image/png");
     $("posterImg").classList.remove("hidden"); $("empty").classList.add("hidden");
-    $("dl").disabled=false;
+    $("dl").disabled=false; $("dlBoth").disabled=false;
+    renderDealers(); draw();
   }
   function setMsg(t,err){ const m=$("msg"); m.textContent=t||""; m.className="msg"+(err?" err":""); }
 
@@ -830,31 +998,7 @@ summary{font-weight:700;cursor:pointer;font-size:16px}
     document.fonts.load(`500 13px Barlow`), document.fonts.load(`700 28px Barlow`), document.fonts.load(`600 17px Barlow`), document.fonts.load(`italic 800 44px 'Barlow Condensed'`), document.fonts.load(`italic 700 28px 'Barlow Condensed'`)
   ]).catch(()=>{}).then(()=>{ if (allRows.length) render(); });
 
-  $("dl").addEventListener("click", async () => {
-    render();
-    const [hh,mm] = ($("updTime").value||nowTime()).split(":");
-    const name = `${(unitPlace()||"unit").replace(/\s+/g,"-")}-billing-update-${todayKey()}-${hh}${mm}.png`;
-    const blob = await new Promise(r => cv.toBlob(r, "image/png"));
-    if (!downloads){
-      // Running outside Claude (e.g. your own hosted link): share on phones, normal download elsewhere
-      const file = new File([blob], name, {type:"image/png"});
-      if (navigator.canShare && navigator.canShare({files:[file]})){
-        try { await navigator.share({files:[file], title:"Billing update"}); setMsg("Poster shared."); return; }
-        catch(e){ if (e && e.name==="AbortError"){ setMsg("Share cancelled."); return; } }
-      }
-      const url = URL.createObjectURL(blob), a = document.createElement("a");
-      a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(()=>URL.revokeObjectURL(url), 4000);
-      setMsg("Poster downloaded.");
-      return;
-    }
-    try { await downloads.save({ filename:name, data:blob }); setMsg("Poster ready to share."); }
-    catch(e){
-      if (e && e.code==="declined") setMsg("Download cancelled.");
-      else if (e && e.code==="rate_limited") setMsg("A save prompt is already open. Try again in a moment.");
-      else setMsg("Saving isn't available here. Long-press the poster to save or share it.", true);
-    }
-  });
+  $("dl").addEventListener("click", async () => { await saveFiles([{name:fileStem()+"-billing-update.png", blob: await posterBlob()}]); });
 })();
 </script>
 </body>
