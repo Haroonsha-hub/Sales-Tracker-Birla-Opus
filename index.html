@@ -643,17 +643,18 @@ summary{font-weight:700;cursor:pointer;font-size:16px}
     // table
     const X0=30, TW=1476, TY=276, HH=60, TOTH=53, TB=718, n=Math.max(rows.length,1);
     const rowH=(TB-TY-HH-TOTH)/n;
-    const cw=[175,215,148,162,160,187,225,204].map(w=>w*TW/1476);
+    const cw=[150,172,118,132,118,122,128,138,160,170].map(w=>w*TW/1408);
     const xs=[]; let acc=X0; cw.forEach(w=>{ xs.push(acc); acc+=w; });
     const NAVY="#0B2656", PUR="#7B3FD0", TEAL="#0E8A7C", VIO="#8C52D8", BLUE="#1E80E4", ORG="#F57A2C", RED="#E8243C";
-    const hbg=[NAVY,NAVY,PUR,TEAL,VIO,BLUE,ORG,RED];
-    const heads=[["TSM TERRITORY"],["TSM NAME"],["MONTHLY","TARGET"],[`${abbr} PHASING`,`TARGET (${pct}%)`],["TODAY BILLED"],["MTD GSR","ACHIEVEMENT"],[`BALANCE TO ${abbr}`,"PHASING TARGET"],["ACHIEVEMENT","%"]];
-    const tint=[null,null,"#EFE8FB","#E5F3EE","#F0E9FB","#E6EFFC","#FDEADB","#FCE7DE"];
+    const GOLD="#E09A00", PINK="#E0457B";
+    const hbg=[NAVY,NAVY,PUR,TEAL,GOLD,VIO,PINK,BLUE,ORG,RED];
+    const heads=[["TSM TERRITORY"],["TSM NAME"],["MONTHLY","TARGET"],[`${abbr} PHASING`,`TARGET (${pct}%)`],["TODAY'S","PLAN"],["TODAY","BILLED VALUE"],["BALANCE","TO GO"],["MTD GSR","ACHIEVEMENT"],[`BALANCE TO ${abbr}`,"PHASING TARGET"],["ACHIEVEMENT","%"]];
+    const tint=[null,null,"#EFE8FB","#E5F3EE","#FDF1D6","#F0E9FB","#FCE6EE","#E6EFFC","#FDEADB","#FCE7DE"];
     ctx.save(); rr(X0,TY,TW,TB-TY,10); ctx.clip();
     ctx.fillStyle="#FFFFFF"; ctx.fillRect(X0,TY,TW,TB-TY);
     hbg.forEach((c,i)=>{ ctx.fillStyle=c; ctx.fillRect(xs[i],TY,cw[i],HH);
       ctx.fillStyle="#FFFFFF"; const L=heads[i], lh=20, y0=TY+HH/2-(L.length-1)*lh/2+7;
-      L.forEach((t,j)=>{ fit(t,cw[i]-12,18,700,COND); const w=ctx.measureText(t).width; ctx.fillText(t, i<2? xs[i]+(i===0?22:20) : xs[i]+(cw[i]-w)/2, y0+j*lh); }); });
+      L.forEach((t,j)=>{ fit(t,cw[i]-12,17,700,COND); const w=ctx.measureText(t).width; ctx.fillText(t, i<2? xs[i]+(i===0?18:16) : xs[i]+(cw[i]-w)/2, y0+j*lh); }); });
     if (xs[1]){ ctx.fillStyle="rgba(255,255,255,.25)"; ctx.fillRect(xs[1],TY,1,HH); }
     const fs=Math.min(17.5,rowH*0.48);
     const achCol = p => p>=0.7 ? "#1E8A57" : p>=0.55 ? "#F08A1C" : "#E0282E";
@@ -668,14 +669,16 @@ summary{font-weight:700;cursor:pointer;font-size:16px}
       cell(0,r.territory,"#1747B5",500,true,Math.min(17,fs));
       cell(1,r.tsm||(r.status==="TBH"?"Vacant":"–"),"#1747B5",500,true,Math.min(17,fs));
       cell(2,f2(r.target),"#2A1B8C",700); cell(3,f2(r.eb),NAVY,700);
-      cell(4,f2(r.today),PUR,700); cell(5,f2(r.mtd),NAVY,700);
-      cell(6,f2(r.balEb), r.balEb<=0 ? "#1E8A57" : "#D9262E",700);
-      cell(7,(r.ach*100).toFixed(2)+"%", achCol(r.ach),800,false,fs+1);
+      cell(4,f2(r.plan),"#8A5A00",700); cell(5,f2(r.today),PUR,700);
+      cell(6,f2(r.balPlan), r.balPlan==null ? "#8A8FA3" : (r.balPlan<=0 ? "#1E8A57" : "#D9262E"),700);
+      cell(7,f2(r.mtd),NAVY,700);
+      cell(8,f2(r.balEb), r.balEb<=0 ? "#1E8A57" : "#D9262E",700);
+      cell(9,(r.ach*100).toFixed(2)+"%", achCol(r.ach),800,false,fs+1);
     });
-    const ty=TB-TOTH, tbg=[NAVY,NAVY,PUR,TEAL,VIO,BLUE,ORG,RED];
+    const ty=TB-TOTH, tbg=hbg;
     tbg.forEach((c,i)=>{ ctx.fillStyle=c; ctx.fillRect(xs[i],ty,cw[i],TOTH); });
     ctx.fillStyle="#FFFFFF"; ctx.font=`700 28px Barlow, sans-serif`; ctx.fillText("TOTAL",X0+20,ty+TOTH/2+10);
-    [[2,f2(tot.target)],[3,f2(tot.eb)],[4,f2(tot.today)],[5,f2(tot.mtd)],[6,f2(tot.balEb)],[7,(tot.ach*100).toFixed(2)+"%"]].forEach(([i,t])=>{
+    [[2,f2(tot.target)],[3,f2(tot.eb)],[4,f2(tot.plan)],[5,f2(tot.today)],[6,f2(tot.balPlan)],[7,f2(tot.mtd)],[8,f2(tot.balEb)],[9,(tot.ach*100).toFixed(2)+"%"]].forEach(([i,t])=>{
       ctx.fillStyle="#FFFFFF"; fit(t,cw[i]-14,29,700,"Barlow, sans-serif"); const w=ctx.measureText(t).width; ctx.fillText(t,xs[i]+(cw[i]-w)/2,ty+TOTH/2+10); });
     ctx.restore();
 
